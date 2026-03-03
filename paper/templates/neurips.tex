@@ -1,0 +1,38 @@
+% NeurIPS-style template (standard article approximation)
+% Uses single-column layout with NeurIPS-like margins and fonts
+\documentclass{{article}}
+\usepackage[utf8]{{inputenc}}
+\usepackage[T1]{{fontenc}}
+\usepackage{{graphicx}}
+\usepackage{{amsmath}}
+\usepackage{{amssymb}}
+\usepackage{{amsthm}}
+\usepackage{{hyperref}}
+\usepackage{{booktabs}}
+\usepackage{{url}}
+\usepackage{{listings}}
+\usepackage{{geometry}}
+\usepackage{{times}}
+\usepackage{{microtype}}
+\geometry{{
+  paperwidth=8.5in, paperheight=11in,
+  left=1.5in, right=1.5in,
+  top=1in, bottom=1in
+}}
+
+\lstset{{basicstyle=\ttfamily\small, breaklines=true, frame=tb}}
+
+\title{{\Large\bf {title}}}
+\author{{{author}}}
+\date{{}}
+
+\begin{{document}}
+\maketitle
+
+\begin{{abstract}}
+% Abstract inserted by body content
+\end{{abstract}}
+
+{body}
+
+\end{{document}}

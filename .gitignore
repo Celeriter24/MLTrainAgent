@@ -1,0 +1,13 @@
+logs/
+papers/
+experiments/
+config/
+
+# IDE
+.idea/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/

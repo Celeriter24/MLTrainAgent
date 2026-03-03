@@ -1,0 +1,38 @@
+# ML Research Sandbox
+# Includes PyTorch, scikit-learn, common ML libs
+# No network access at runtime (passed via docker config)
+
+FROM python:3.11-slim
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ML Python packages
+RUN pip install --no-cache-dir \
+    torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu \
+    scikit-learn \
+    numpy \
+    pandas \
+    matplotlib \
+    seaborn \
+    xgboost \
+    lightgbm \
+    optuna \
+    tqdm \
+    joblib
+
+# Working dirs
+RUN mkdir -p /workspace /results
+
+WORKDIR /workspace
+
+# Non-root user for safety
+RUN useradd -m -u 1000 researcher && \
+    chown -R researcher:researcher /workspace /results
+USER researcher
+
+# Default command (overridden at runtime)
+CMD ["python", "/workspace/experiment.py"]
