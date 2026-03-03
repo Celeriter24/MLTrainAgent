@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+ #!/usr/bin/env python3
 """
 ML Research Agent — Entry Point
 
@@ -35,12 +35,12 @@ def setup_logging(level: str = "INFO"):
 def main():
     parser = argparse.ArgumentParser(description="ML Research Agent")
     parser.add_argument("--goal", required=True, help="Research question or hypothesis")
-    parser.add_argument("--model", default=None, help="Override LLM model name")
-    parser.add_argument("--backend", default=None, help="Override LLM backend (ollama|lmstudio|vllm)")
-    parser.add_argument("--config", default="config/settings.yaml", help="Config file path")
-    parser.add_argument("--max-iter", type=int, default=None, help="Max experiment iterations")
+    parser.add_argument("--model", default="qwen2.5-coder:14b", help="Override LLM model name")
+    parser.add_argument("--backend", default="ollama", help="Override LLM backend (ollama|lmstudio|vllm)")
+    parser.add_argument("--config", default="config/settings.yaml", help="Config file path for docker")
     parser.add_argument("--gpu", action="store_true", help="Enable GPU in Docker")
-    parser.add_argument("--template", default=None, help="Paper template (ieee|neurips|icml|plain)")
+    parser.add_argument("--gpu-device", default=None, help="GPU device index (e.g. 0=RTX3070, 1=A6000)")
+    parser.add_argument("--template", default="plain", help="Paper template (ieee|neurips|icml|plain)")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
@@ -54,10 +54,10 @@ def main():
         config["llm"]["model"] = args.model
     if args.backend:
         config["llm"]["backend"] = args.backend
-    if args.max_iter:
-        config["experiment"]["max_iterations"] = args.max_iter
     if args.gpu:
         config["docker"]["gpu"] = True
+    if args.gpu_device is not None:
+        config["docker"]["gpu_device"] = args.gpu_device
     if args.template:
         config["paper"]["template"] = args.template
 

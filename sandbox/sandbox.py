@@ -3,6 +3,7 @@ Docker Sandbox — safely runs ML code in an isolated container.
 """
 
 import os
+import platform
 import tarfile
 import io
 import logging
@@ -30,13 +31,31 @@ class ExecutionResult:
 class DockerSandbox:
     def __init__(self, config: dict):
         self.cfg = config["docker"]
-        self.image = self.cfg["image"]
         self.mem_limit = self.cfg.get("memory_limit", "8g")
         self.cpu_limit = float(self.cfg.get("cpu_limit", 4.0))
-        self.gpu = self.cfg.get("gpu", False)
         self.timeout = int(self.cfg.get("timeout", 600))
         self.network = self.cfg.get("network", "none")
         self.auto_cleanup = self.cfg.get("auto_cleanup", True)
+
+        gpu_requested = self.cfg.get("gpu", False)
+        system = platform.system()
+
+        if system == "Darwin":
+            if gpu_requested:
+                logger.warning("macOS detected — GPU flag ignored (Docker on Mac has no GPU support)")
+            self.gpu = False
+            self.dockerfile = "sandbox/Dockerfile.sandbox"
+            self.image = self.cfg.get("image_cpu", "ml-sandbox:cpu")
+        elif gpu_requested:
+            self.gpu = True
+            self.dockerfile = "sandbox/Dockerfile.sandbox-gpu"
+            self.image = self.cfg.get("image_gpu", "ml-sandbox:gpu")
+        else:
+            self.gpu = False
+            self.dockerfile = "sandbox/Dockerfile.sandbox"
+            self.image = self.cfg.get("image_cpu", "ml-sandbox:cpu")
+
+        logger.info(f"Platform: {system} | GPU: {self.gpu} | Image: {self.image}")
 
         try:
             self.client = docker.from_env()
@@ -63,8 +82,12 @@ class DockerSandbox:
                     )
                 ]
 
+            backend = "gpu" if self.gpu else "cpu"
+            container_name = f"mlresearch-{backend}-{time.strftime('%Y%m%d-%H%M%S')}"
+
             container = self.client.containers.create(
                 image=self.image,
+                name=container_name,
                 command=["python", "/workspace/experiment.py"],
                 mem_limit=self.mem_limit,
                 nano_cpus=int(self.cpu_limit * 1e9),
@@ -156,11 +179,11 @@ class DockerSandbox:
         except ImageNotFound:
             return False
 
-    def build_image(self, dockerfile_path: str = "docker/Dockerfile.sandbox"):
-        logger.info(f"Building {self.image} from {dockerfile_path} ...")
+    def build_image(self):
+        logger.info(f"Building {self.image} from {self.dockerfile} ...")
         self.client.images.build(
             path=str(Path.cwd()),
-            dockerfile=dockerfile_path,
+            dockerfile=self.dockerfile,
             tag=self.image,
             rm=True,
         )

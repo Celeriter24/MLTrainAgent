@@ -1,0 +1,34 @@
+# ML Research Sandbox — GPU variant (CUDA 12.4, requires nvidia-container-toolkit)
+FROM nvidia/cuda:12.4.0-cudnn-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3-pip build-essential libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# PyTorch with CUDA 12.4 support
+RUN pip3 install --no-cache-dir \
+    torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cu124
+
+# Other ML packages from PyPI
+RUN pip3 install --no-cache-dir \
+    scikit-learn \
+    numpy \
+    pandas \
+    matplotlib \
+    seaborn \
+    xgboost \
+    lightgbm \
+    optuna \
+    tqdm \
+    joblib
+
+RUN mkdir -p /workspace /results
+WORKDIR /workspace
+
+RUN useradd -m -u 1000 researcher && \
+    chown -R researcher:researcher /workspace /results
+USER researcher
+
+CMD ["python3", "/workspace/experiment.py"]

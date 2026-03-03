@@ -31,7 +31,7 @@ from llm.prompts import (
     build_coder_prompt,
 )
 from llm.parser import parse_llm_response, extract_metrics, extract_error
-from docker.sandbox import DockerSandbox
+from sandbox.sandbox import DockerSandbox
 from paper.generator import PaperGenerator
 from core.state import ExperimentState
 from core.checkpoint import CheckpointManager
@@ -40,6 +40,12 @@ from telegram.notifier import TelegramNotifier
 logger = logging.getLogger(__name__)
 
 _CONFIRM_KEYWORDS = {"ja", "yes", "y", "start", "run", "starten", "go", "ok", "okay"}
+
+_PAPER_KEYWORDS = {
+    "write paper", "write report", "paper schreiben", "report schreiben",
+    "fertig", "finish", "done", "that's enough", "generate paper",
+    "paper", "report",
+}
 
 
 @dataclass
@@ -59,7 +65,6 @@ class ResearchAgent:
         self.paper_gen = PaperGenerator(config)
         self.notifier = TelegramNotifier(config)
         self.checkpoint_mgr = CheckpointManager(config)
-        self.max_iter = config["experiment"].get("max_iterations", 10)
         self.save_dir = Path(config["experiment"].get("save_dir", "experiments"))
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.reply_timeout = config.get("telegram", {}).get("reply_timeout", 3600)
@@ -77,14 +82,15 @@ class ResearchAgent:
         stopped_reason: str | None = "Session wurde nicht abgeschlossen"
         paper_path: Path | None = None
 
+        session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.session_dir = self.save_dir / session_id
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+
         logger.info(f"🔬 Research goal: {goal}")
-        logger.info(f"🐳 Docker image: {self.config['docker']['image']}")
+        logger.info(f"📁 Session ID: {session_id}")
+        logger.info(f"🐳 Docker image: {self.sandbox.image}")
 
         try:
-            if not self.sandbox.image_exists():
-                logger.info("Docker image not found — building it now...")
-                self.sandbox.build_image()
-
             # ── Startup: Checkpoint anbieten ──────────────────────────────
             latest = self.checkpoint_mgr.load_latest()
             if latest:
@@ -136,7 +142,12 @@ class ResearchAgent:
                 )
 
             # ── Haupt-Diskussions-Loop ─────────────────────────────────────
-            while session.experiment_count < self.max_iter:
+            while True:
+
+                if self._user_wants_paper(user_reply):
+                    logger.info("📝 User möchte Paper — generiere...")
+                    self.notifier.send("Got it, generating the paper now...")
+                    break
 
                 session.researcher_messages.append({"role": "user", "content": user_reply})
                 logger.info("💭 Researcher: denkt nach...")
@@ -159,7 +170,7 @@ class ResearchAgent:
                 if researcher_parsed.action == "RUN" and researcher_parsed.experiment_spec:
                     confirm_msg = (
                         f"{researcher_raw}\n\n"
-                        f"▶ Experiment starten? (*ja* / *nein* / Änderungen beschreiben)"
+                        f"▶ Start experiment? (yes / no / describe changes)"
                     )
                     user_reply = self._await_user(confirm_msg, session)
                     if user_reply is None:
@@ -176,7 +187,7 @@ class ResearchAgent:
                             formatted_output = self._format_docker_output(exec_result)
                             metrics = extract_metrics(exec_result.output)
                             success = (exec_result.exit_code == 0)
-                            artifact_paths = self._save_artifacts(exec_result, session.experiment_count)
+                            artifact_paths = self._save_artifacts(exec_result, session.experiment_count, code=coder_code)
 
                             session.exp_state.add_iteration(
                                 code=coder_code,
@@ -380,6 +391,10 @@ class ResearchAgent:
         Coder schreibt Code, Docker führt aus (inkl. einem Debug-Retry).
         Returns (ExecutionResult, code_str) oder (None, "") bei komplettem Fehler.
         """
+        if not self.sandbox.image_exists():
+            logger.info("Docker image not found — building it now...")
+            self.sandbox.build_image()
+
         logger.info("🖊️  Coder: schreibt Code...")
         code_messages = [
             {"role": "system", "content": CODER_SYSTEM_PROMPT},
@@ -416,16 +431,25 @@ class ResearchAgent:
 
         return exec_result, coder_parsed.code
 
-    def _save_artifacts(self, exec_result, iteration: int) -> dict:
+    def _save_artifacts(self, exec_result, iteration: int, code: str = "") -> dict:
+        artifact_dir = self.session_dir / f"iter_{iteration}"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+
         artifact_paths = {}
-        if exec_result.files:
-            artifact_dir = self.save_dir / f"iter_{iteration}"
-            artifact_dir.mkdir(parents=True, exist_ok=True)
-            for fname, data in exec_result.files.items():
-                fpath = artifact_dir / fname
-                fpath.write_bytes(data)
-                artifact_paths[fname] = str(fpath)
-            logger.info(f"💾 {len(artifact_paths)} Artifacts gespeichert")
+
+        # Always save the generated code
+        if code:
+            code_path = artifact_dir / "experiment.py"
+            code_path.write_text(code, encoding="utf-8")
+            artifact_paths["experiment.py"] = str(code_path)
+
+        # Save /results/ files from container (plots, CSVs, etc.)
+        for fname, data in exec_result.files.items():
+            fpath = artifact_dir / fname
+            fpath.write_bytes(data)
+            artifact_paths[fname] = str(fpath)
+
+        logger.info(f"💾 {len(artifact_paths)} Artifacts gespeichert in {artifact_dir}")
         return artifact_paths
 
     def _format_docker_output(self, exec_result) -> str:
@@ -444,7 +468,13 @@ class ResearchAgent:
     @staticmethod
     def _user_confirmed(text: str) -> bool:
         first_word = text.strip().lower().split()[0] if text.strip() else ""
+        first_word = first_word.strip("*_~`.,!?")  # strip Telegram markdown & punctuation
         return first_word in _CONFIRM_KEYWORDS
+
+    @staticmethod
+    def _user_wants_paper(text: str) -> bool:
+        normalized = text.strip().lower().strip("*_~`.,!?")
+        return normalized in _PAPER_KEYWORDS
 
     # ── Paper & Speichern ─────────────────────────────────────────────────────
 
@@ -476,8 +506,7 @@ class ResearchAgent:
         state: ExperimentState,
         stopped_reason: str | None = None,
     ):
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out = self.save_dir / f"experiment_{ts}.json"
+        out = self.session_dir / "experiment.json"
         data = state.to_dict()
         data["config_snapshot"] = self._safe_config_snapshot(self.config)
         if stopped_reason:
@@ -496,7 +525,8 @@ class ResearchAgent:
                 "max_tokens":  config["llm"].get("max_tokens"),
             },
             "docker": {
-                "image":        config["docker"]["image"],
+                "image_cpu":    config["docker"].get("image_cpu"),
+                "image_gpu":    config["docker"].get("image_gpu"),
                 "memory_limit": config["docker"].get("memory_limit"),
                 "cpu_limit":    config["docker"].get("cpu_limit"),
                 "gpu":          config["docker"].get("gpu"),

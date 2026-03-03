@@ -92,16 +92,18 @@ class PaperGenerator:
             # Run compiler (twice for references/TOC)
             pdf_path = self._run_compiler(tmpdir, main_tex)
 
+            slug = self._slugify(title)
+            dest_tex = self.output_dir / f"{slug}.tex"
+            shutil.copy(main_tex, dest_tex)
+
             if pdf_path and pdf_path.exists():
-                dest = self.output_dir / f"{self._slugify(title)}.pdf"
+                dest = self.output_dir / f"{slug}.pdf"
                 shutil.copy(pdf_path, dest)
-                logger.info(f"📄 Paper compiled successfully: {dest}")
+                logger.info(f"📄 Paper compiled: {dest}")
+                logger.info(f"📝 LaTeX source:   {dest_tex}")
                 return dest
             else:
-                # Save the .tex as fallback
-                dest_tex = self.output_dir / f"{self._slugify(title)}.tex"
-                shutil.copy(main_tex, dest_tex)
-                logger.error(f"PDF compilation failed — saved .tex to {dest_tex}")
+                logger.error(f"PDF compilation failed — LaTeX saved to {dest_tex}")
                 return dest_tex
 
     def _run_compiler(self, workdir: Path, tex_file: Path) -> Path | None:
